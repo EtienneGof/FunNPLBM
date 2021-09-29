@@ -50,43 +50,18 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     this.multivariateStudentLogPdf(x, this.mu, studentPsi, studentNu)
   }
 
-  def posteriorPredictive(x: DenseVector[Double], X: List[DenseVector[Double]]): Double = {
-    this.update(X).predictive(x)
-  }
-
   def jointPosteriorPredictive(newObs: List[DenseVector[Double]], X: List[DenseVector[Double]]): Double = {
     this.update(X).jointPriorPredictive(newObs)
   }
 
-  def jointPosteriorPredictive3(newObs: List[DenseVector[Double]], X: List[DenseVector[Double]]): Double = {
-    val updatedPrior = this.update(X)
-    newObs.par.map(updatedPrior.predictive).toList.sum
-  }
-
-  def jointPosteriorPredictive4(newObs: List[DenseVector[Double]], X: List[DenseVector[Double]]): Double = {
-    val updatedPrior = this.update(X)
-    newObs.par.map(x => updatedPrior.priorPredictive(List(x)).head).toList.sum
-  }
-
-  //  With raw computation
-  //  p(x | prior), for several x
-  def priorPredictive(X: List[DenseVector[Double]]): List[Double] = {
-    X.map(x =>{
-      val updatedPrior = this.update(List(x))
-      val a = - (p/2) * log (Pi)
-      val b = (this.nu / 2) * log(det(this.psi)) -  ((this.nu + 1) / 2) * log(det(updatedPrior.psi))
-      val c = multiloggamma((this.nu + 1) / 2D, p) - multiloggamma(this.nu / 2D, p)
-      val d = (p/2) * log(this.kappa / updatedPrior.kappa)
-      a + b + c + d
-    })
-  }
-
-  // With Multivariate Student
-  // p(X | prior)
-
   def jointPriorPredictive(X: List[DenseVector[Double]]): Double = {
+    val m = X.length
     val updatedPrior = this.update(X)
-    X.par.map(updatedPrior.predictive).toList.sum
+    val a = -m * d * 0.5 * log(Pi)
+    val b = (d / 2D) * log(this.kappa / updatedPrior.kappa)
+    val c = multiloggamma(updatedPrior.nu / 2D, d) - multiloggamma(this.nu / 2D, d)
+    val e =  (this.nu / 2D) * log(det(this.psi)) - (updatedPrior.nu / 2D) * log(det(updatedPrior.psi))
+    a + b + c + e
   }
 
   def multivariateStudentLogPdf(x: DenseVector[Double], mu: DenseVector[Double], sigma: DenseMatrix[Double], nu: Double): Double = {
@@ -212,44 +187,6 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     val paramsDensity = componentsByCol.reduce(_++_).map(logPdf).sum
     rowPartitionDensity + colPartitionDensity + paramsDensity + dataLikelihood
   }
-
-  def NPCLBMDPVlikelihood(alphaRowPrior: breeze.stats.distributions.Gamma,
-                          alphaColPrior: breeze.stats.distributions.Gamma,
-                          alphaRows: List[Double],
-                          alphaCol: Double,
-                          dataByCol: List[List[DenseVector[Double]]],
-                          rowMembership: List[List[Int]],
-                          colMembership: List[Int],
-                          countRowCluster: List[List[Int]],
-                          countColCluster: List[Int],
-                          priors: List[NormalInverseWishart],
-                          componentsByVar: List[List[MultivariateGaussian]]): Double = {
-
-    val Ks = countRowCluster.map(_.length)
-    val L = countColCluster.length
-
-    require(rowMembership.length == countRowCluster.length)
-    require(componentsByVar.length == dataByCol.length)
-
-    val alphaDensity = alphaRows.map(alphaRowPrior.logPdf).sum + alphaColPrior.logPdf(alphaCol)
-
-    val colPartitionDensity = probabilityPartition(L, alphaCol, countColCluster, dataByCol.length)
-    val rowPartitionDensity = alphaRows.indices.map(l => probabilityPartition(Ks(l),alphaRows(l), countRowCluster(l), dataByCol.head.length)).sum
-
-    val dataLikelihood = dataByCol.indices.par.map(j => {
-      dataByCol.head.indices.map(i => {
-        val comp = componentsByVar(j)(rowMembership(colMembership(j))(i))
-        comp.logPdf(dataByCol(j)(i))
-      }).sum
-    }).sum
-
-    val paramsDensity = componentsByVar.indices.map(j => {
-      componentsByVar(j).map(priors(j).logPdf).sum
-    }).sum
-
-    rowPartitionDensity + colPartitionDensity + paramsDensity + dataLikelihood + alphaDensity
-  }
-
 
   def posteriorSample(Data: List[DenseVector[Double]],
                       rowMembership: List[Int]) : List[MultivariateGaussian] = {
