@@ -47,7 +47,7 @@ object dataGeneration {
     require(mat.cols ==  colPartitionSize.sum)
     println(mat.rows, mat.cols)
 
-    Common.IO.writeMatrixDvDoubleToCsv("playground/benchmarkECML/dataset.csv", mat)
+    Common.IO.writeMatrixDvDoubleToCsv("src/main/scala/dataset.csv", mat)
 
   }
 }
