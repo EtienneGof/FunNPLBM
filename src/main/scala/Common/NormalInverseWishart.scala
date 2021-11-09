@@ -1,8 +1,9 @@
 package Common
 
-import breeze.linalg.{DenseMatrix, DenseVector, det, inv, sum, trace}
+import breeze.linalg.{Axis, DenseMatrix, DenseVector, det, diag, inv, sum, trace}
 import breeze.numerics.constants.Pi
-import breeze.numerics.{log, multiloggamma, pow}
+import breeze.numerics.{lgamma, log, multiloggamma, pow}
+import breeze.linalg.upperTriangular
 import breeze.stats.distributions.{MultivariateGaussian, Wishart}
 import org.apache.commons.math3.special.Gamma
 
@@ -11,8 +12,8 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
                            var psi: DenseMatrix[Double] = DenseMatrix(1D),
                            var nu: Int = 1
                           ) {
-  var p: Int = psi.rows
-  var studentNu: Int = this.nu - p + 1
+  var d: Int = psi.rows
+  var studentNu: Int = this.nu - d + 1
   var studentPsi: DenseMatrix[Double] = ((this.kappa + 1) / (this.kappa * studentNu)) * this.psi
 
   def this(dimension: Int) = {
@@ -29,21 +30,38 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     val globalMean     = Common.ProbabilisticTools.meanListDV(dataFlattened)
     val globalVariance = Common.ProbabilisticTools.covariance(dataFlattened, globalMean)
     val globalPrecision = inv(globalVariance)
-
     this.mu = globalMean
     this.kappa = 1D
     this.psi = globalPrecision
     this.nu = globalMean.length + 1
-    this.p = psi.rows
-    this.studentNu = this.nu - p + 1
+    this.d = psi.rows
+    this.studentNu = this.nu - d + 1
     this.studentPsi = ((this.kappa + 1) / (this.kappa * studentNu)) * this.psi
   }
 
-
   def sample(): MultivariateGaussian = {
     val newSig = Wishart(this.nu, this.psi).sample()
+    //    require(upperTriangular(newSig)==upperTriangular(newSig.t), newSig)
+    //    var isSym = true
+    //    for(i <- 0 until d){
+    //      for(j <- 0 until d){
+    //        if(newSig(i,j)!= newSig(j,i)){
+    //          isSym=false
+    //        }
+    //      }
+    //    }
+    //    require(isSym)
     val newMu = MultivariateGaussian(this.mu, inv(newSig * this.kappa)).draw()
     MultivariateGaussian(newMu, newSig/pow(this.kappa,2))
+  }
+
+  def multivariateStudentLogPdf(x: DenseVector[Double], mu: DenseVector[Double], sigma: DenseMatrix[Double], nu: Double): Double = {
+    val d = mu.length
+    val x_mu = x - mu
+    val a = Gamma.logGamma((nu + d) / 2D)
+    val b = Gamma.logGamma(nu / 2D) + (d / 2D) * log(Pi * nu) + .5 *log(det(sigma))
+    val c = -(nu + d) / 2D * log(1 + (1D / nu)* (x_mu.t * inv(sigma) * x_mu))
+    a - b + c
   }
 
   def predictive(x: DenseVector[Double]): Double = {
@@ -64,15 +82,6 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     a + b + c + e
   }
 
-  def multivariateStudentLogPdf(x: DenseVector[Double], mu: DenseVector[Double], sigma: DenseMatrix[Double], nu: Double): Double = {
-    val d = mu.length
-    val x_mu = x - mu
-    val a = Gamma.logGamma((nu + d)/2D)
-    val b = Gamma.logGamma(nu / 2D) + (d/2D) * log(Pi * nu) + .5 *log(det(sigma))
-    val c = log(pow(1 + (1D/nu)* (x_mu.t * inv(sigma) * x_mu), -(nu + d)/2D))
-    (a-b)+c
-  }
-
   def update(data: List[DenseVector[Double]]): NormalInverseWishart = {
 
     val n = data.length.toDouble
@@ -83,7 +92,7 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     val x_mu0 = meanData - this.mu
 
     val C = if (n == 1) {
-      DenseMatrix.zeros[Double](p,p)
+      DenseMatrix.zeros[Double](d,d)
     } else {
       sum(data.map(x => {
         val x_mu = x - meanData
@@ -92,6 +101,18 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     }
 
     val newPsi = this.psi + C + ((n * this.kappa) / newKappa) * (x_mu0 * x_mu0.t)
+    new NormalInverseWishart(newMu, newKappa, newPsi, newNu)
+  }
+
+  def weightedUpdate(data: DenseVector[Double], weight: Int): NormalInverseWishart = {
+    val repeatedData = List.fill(weight)(data)
+    val n = repeatedData.length.toDouble
+    val meanData = repeatedData.reduce(_ + _) / n.toDouble
+    val newKappa: Double = this.kappa + n
+    val newNu = this.nu + n.toInt
+    val newMu = (this.kappa * this.mu + n * meanData) / newKappa
+    val x_mu0 = meanData - this.mu
+    val newPsi = this.psi + ((n * this.kappa) / newKappa) * (x_mu0 * x_mu0.t)
     new NormalInverseWishart(newMu, newKappa, newPsi, newNu)
   }
 
@@ -116,7 +137,7 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     val newMu = (this.kappa * this.mu - n * meanData) / newKappa
     val x_mu0 = meanData - this.mu
     val C = if (n == 1) {
-      DenseMatrix.zeros[Double](p,p)
+      DenseMatrix.zeros[Double](d,d)
     } else {
       sum(data.map(x => {
         val x_mu = x - meanData
@@ -124,6 +145,31 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
       }))
     }
     val newPsi = this.psi - C - ((n * this.kappa) / newKappa) * (x_mu0 * x_mu0.t)
+    new NormalInverseWishart(newMu, newKappa, newPsi, newNu)
+  }
+
+
+  def weightedRemoveObservation(data: DenseVector[Double], weight: Int): NormalInverseWishart = {
+    val repeatedData = List.fill(weight)(data)
+
+    val n = weight.toDouble
+    val meanData = repeatedData.reduce(_ + _) / n.toDouble
+    val newKappa = this.kappa - n
+    val newNu = this.nu - n.toInt
+    val newMu = (this.kappa * this.mu - n * meanData) / newKappa
+    val x_mu0 = meanData - this.mu
+    val C = if (n == 1) {
+      DenseMatrix.zeros[Double](d,d)
+    } else {
+      sum(repeatedData.map(x => {
+        val x_mu = x - meanData
+        x_mu * x_mu.t
+      }))
+    }
+
+    val newPsi = this.psi - C - ((n * this.kappa) / newKappa) * (x_mu0 * x_mu0.t)
+    require(newKappa>0)
+    require(newNu>0)
     new NormalInverseWishart(newMu, newKappa, newPsi, newNu)
   }
 
@@ -135,9 +181,9 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
 
   def InvWishartlogPdf(Sigma:DenseMatrix[Double]): Double = {
     (nu / 2D) * log(det(psi)) -
-      ((nu * p) / 2D) * log(2) -
-      multiloggamma( nu / 2D, p) -
-      0.5*(nu + p + 1) * log(det(Sigma)) -
+      ((nu * d) / 2D) * log(2) -
+      multiloggamma( nu / 2D, d) -
+      0.5*(nu + d + 1) * log(det(Sigma)) -
       0.5 * trace(psi * inv(Sigma))
   }
 
@@ -188,6 +234,44 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
     rowPartitionDensity + colPartitionDensity + paramsDensity + dataLikelihood
   }
 
+  def NPCLBMDPVlikelihood(alphaRowPrior: breeze.stats.distributions.Gamma,
+                          alphaColPrior: breeze.stats.distributions.Gamma,
+                          alphaRows: List[Double],
+                          alphaCol: Double,
+                          dataByCol: List[List[DenseVector[Double]]],
+                          rowMembership: List[List[Int]],
+                          colMembership: List[Int],
+                          countRowCluster: List[List[Int]],
+                          countColCluster: List[Int],
+                          priors: List[NormalInverseWishart],
+                          componentsByVar: List[List[MultivariateGaussian]]): Double = {
+
+    val Ks = countRowCluster.map(_.length)
+    val L = countColCluster.length
+
+    require(rowMembership.length == countRowCluster.length)
+    require(componentsByVar.length == dataByCol.length)
+
+    val alphaDensity = alphaRows.map(alphaRowPrior.logPdf).sum + alphaColPrior.logPdf(alphaCol)
+
+    val colPartitionDensity = probabilityPartition(L, alphaCol, countColCluster, dataByCol.length)
+    val rowPartitionDensity = alphaRows.indices.map(l => probabilityPartition(Ks(l),alphaRows(l), countRowCluster(l), dataByCol.head.length)).sum
+
+    val dataLikelihood = dataByCol.indices.par.map(j => {
+      dataByCol.head.indices.map(i => {
+        val comp = componentsByVar(j)(rowMembership(colMembership(j))(i))
+        comp.logPdf(dataByCol(j)(i))
+      }).sum
+    }).sum
+
+    val paramsDensity = componentsByVar.indices.map(j => {
+      componentsByVar(j).map(priors(j).logPdf).sum
+    }).sum
+
+    rowPartitionDensity + colPartitionDensity + paramsDensity + dataLikelihood + alphaDensity
+  }
+
+
   def posteriorSample(Data: List[DenseVector[Double]],
                       rowMembership: List[Int]) : List[MultivariateGaussian] = {
     (Data zip rowMembership).groupBy(_._2).values.par.map(e => {
@@ -237,7 +321,7 @@ class NormalInverseWishart(var mu: DenseVector[Double] = DenseVector(0D),
   }
 
   def expectation() : MultivariateGaussian = {
-    val expectedSigma = this.psi / (this.nu - this.p - 1).toDouble
+    val expectedSigma = this.psi / (this.nu - d - 1).toDouble
     val expectedMu = this.mu
     MultivariateGaussian(expectedMu, expectedSigma)
   }

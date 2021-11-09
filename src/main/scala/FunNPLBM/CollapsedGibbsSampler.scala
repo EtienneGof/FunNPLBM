@@ -5,7 +5,7 @@ import Common.ProbabilisticTools._
 import Common.Tools._
 import breeze.linalg.DenseVector
 import breeze.numerics.log
-import breeze.stats.distributions.{Gamma, MultivariateGaussian}
+import breeze.stats.distributions.Gamma
 
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
@@ -19,7 +19,7 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
                             var initByUserRowPartition: Option[List[Int]] = None,
                             var initByUserColPartition: Option[List[Int]] = None) extends Serializable {
 
-  val DataByRow: List[List[DenseVector[Double]]] = Data.transpose
+  val DataByRow = Data.transpose
   val n: Int = Data.head.length
   val p: Int = Data.length
 
@@ -28,8 +28,8 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
     case None => new NormalInverseWishart(Data)
   }
 
-  val d: Int = prior.p
-  require(prior.p == Data.head.head.length, "Prior and data dimensions differ")
+  val d: Int = prior.d
+  require(prior.d == Data.head.head.length, "Prior and data dimensions differ")
 
   var rowPartition: List[Int] = initByUserRowPartition match {
     case Some(m) =>
@@ -111,12 +111,11 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
                                             verbose: Boolean=false): List[Double] = {
 
     val xByRow = (x zip partitionOtherDimension).groupBy(_._2).map(v => (v._1, v._2.map(_._1)))
-
-    NIWParams.indices.map(l => {
-      NIWParams.head.indices.map(k => {
+    NIWParams.indices.par.map(l => {
+      (l, NIWParams.head.indices.par.map(k => {
         NIWParams(l)(k).jointPriorPredictive(xByRow(k))
-      }).sum + log(countCluster(l))
-    }).toList
+      }).sum + log(countCluster(l)))
+    }).toList.sortBy(_._1).map(_._2)
   }
 
   def drawMembership(x: List[DenseVector[Double]],
@@ -207,7 +206,7 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
     }
   }
 
-  def updateRowPartition(verbose: Boolean = false): Unit = {
+  def updateRowPartition(verbose: Boolean = false) = {
     for (i <- DataByRow.indices) {
       val currentData = DataByRow(i)
       val currentPartition = rowPartition(i)
@@ -218,20 +217,20 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
     }
   }
 
-  def updateColPartition(verbose: Boolean = false): Unit = {
+  def updateColPartition(verbose: Boolean = false) = {
     for (i <- Data.indices) {
       val currentData = Data(i)
       val currentPartition = colPartition(i)
       removeElementFromColCluster(currentData, currentPartition)
-      val newPartition = drawMembership(currentData, rowPartition, countColCluster, NIWParamsByCol, actualBeta)
-      colPartition = colPartition.updated(i, newPartition)
-      addElementToColCluster(currentData, newPartition)
+      val newMembership = drawMembership(currentData, rowPartition, countColCluster, NIWParamsByCol, actualBeta)
+      colPartition = colPartition.updated(i, newMembership)
+      addElementToColCluster(currentData, newMembership)
     }
   }
 
   def run(nIter: Int = 10,
           nIterBurnin: Int = 10,
-          verbose: Boolean = false): (List[List[Int]], List[List[Int]], List[List[List[MultivariateGaussian]]]) = {
+          verbose: Boolean = false) = {
 
     @tailrec def go(rowPartitionEveryIteration: List[List[Int]],
                     colPartitionEveryIteration: List[List[Int]],
@@ -240,8 +239,7 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
 
       if(verbose){
         println("\n>>>>>> Iteration: " + iter.toString)
-        println(countRowCluster.toList)
-        println(countColCluster.toList)
+        Common.Tools.prettyPrintLBM(countRowCluster.toList, countColCluster.toList)
       }
 
       if (iter > (nIter + nIterBurnin)) {
@@ -276,14 +274,17 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
     val (rowPartitionEveryIterations, colPartitionEveryIterations) = go(List(rowPartition), List(colPartition), 1)
 
     // Final results
-//    val finalRowPartitions = new PartitionDistribution(rowPartitionEveryIterations.toArray.map(_.toArray).drop(nIterBurnin)) .run()
-//    val finalColPartitions = new PartitionDistribution(colPartitionEveryIterations.toArray.map(_.toArray).drop(nIterBurnin)) .run()
-//    val finalComponents = clustersParametersEstimation(Data, prior, finalRowPartitions, finalColPartitions)
-//    (finalRowPartitions, finalColPartitions, finalComponents)
+    //    val finalRowPartitions = new PartitionDistribution(rowPartitionEveryIterations.toArray.map(_.toArray).drop(nIterBurnin)) .run()
+    //    val finalColPartitions = new PartitionDistribution(colPartitionEveryIterations.toArray.map(_.toArray).drop(nIterBurnin)) .run()
+    //    val finalComponents = clustersParametersEstimation(Data, prior, finalRowPartitions, finalColPartitions)
+    //    (finalRowPartitions, finalColPartitions, finalComponents)
 
     // Every iterations results
     val componentsEveryIterations = rowPartitionEveryIterations.indices.map(i => {
-      clustersParametersEstimation(Data, prior, rowPartitionEveryIterations(i), colPartitionEveryIterations(i))
+      //      println(rowPartitionEveryIterations(i).distinct,  colPartitionEveryIterations(i).distinct)
+      val components = clustersParametersEstimation(Data, prior, rowPartitionEveryIterations(i), colPartitionEveryIterations(i))
+      //      println(components.length, components.head.length)
+      components
     }).toList
     (rowPartitionEveryIterations, colPartitionEveryIterations,  componentsEveryIterations)
 
@@ -291,10 +292,9 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
 
 
   def runWithFixedPartitions(nIter: Int = 10,
-                              nIterBurnin: Int = 10,
-                              updateCol: Boolean = false,
-                              updateRow: Boolean = true,
-                              verbose: Boolean = false): (List[List[Int]], List[List[Int]], List[List[List[MultivariateGaussian]]]) = {
+                             updateCol: Boolean = false,
+                             updateRow: Boolean = true,
+                             verbose: Boolean = false)  = {
 
     @tailrec def go(rowPartitionEveryIteration: List[List[Int]],
                     colPartitionEveryIteration: List[List[Int]],
@@ -303,11 +303,10 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
 
       if(verbose){
         println("\n>>>>>> Iteration: " + iter.toString)
-        println(countRowCluster.toList)
-        println(countColCluster.toList)
+        Common.Tools.prettyPrintLBM(countRowCluster.toList, countColCluster.toList)
       }
 
-      if (iter > (nIter + nIterBurnin)) {
+      if (iter > nIter) {
 
         (rowPartitionEveryIteration, colPartitionEveryIteration)
 
@@ -316,16 +315,19 @@ class CollapsedGibbsSampler(val Data: List[List[DenseVector[Double]]],
         var t0 = System.nanoTime()
 
         if(updateRow){
+
           updateRowPartition()
 
           if(verbose){
             t0 = printTime(t0, "draw row Partition")
-            if(updateAlphaFlag){actualAlpha = updateAlpha(actualAlpha, actualAlphaPrior, countRowCluster.length, n)}
-
           }
+
+          if(updateAlphaFlag){actualAlpha = updateAlpha(actualAlpha, actualAlphaPrior, countRowCluster.length, n)}
+
         }
 
         if(updateCol){
+
           updateColPartition()
 
           if(verbose){

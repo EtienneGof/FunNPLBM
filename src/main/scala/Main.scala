@@ -3,10 +3,24 @@ import Common.IO
 import Common.Tools._
 import breeze.linalg.{DenseMatrix, DenseVector}
 import breeze.stats.distributions.Gamma
+import org.apache.spark.sql.SparkSession
 
 object Main {
 
-        def main(args: Array[String]) {
+  implicit val ss: SparkSession = SparkSession
+    .builder()
+    .master("local[*]")
+    .appName("AnalysePlan")
+    .config("spark.executor.cores", 2)
+    //.config("spark.executor.memory", "30G")
+    .config("spark.executor.heartbeatInterval", "20s")
+    .config("spark.driver.memory", "10G")
+    .getOrCreate()
+
+  ss.sparkContext.setLogLevel("WARN")
+  ss.sparkContext.setCheckpointDir("checkpointDir")
+
+  def main(args: Array[String]) {
 
                 val shape = 1E1
                 val scale = 2E1
@@ -41,7 +55,7 @@ object Main {
 
                         var t0 = System.nanoTime()
 
-                        val bestBGMMRow = LBM.ModelSelection.gridSearch(
+                        val bestBGMMRow = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(5),
                           rangeCol = List(1),
@@ -50,7 +64,7 @@ object Main {
                           nTryMaxPerConcurrent = 1)
                         val bestBGMMRowPartition = bestBGMMRow("RowPartition").asInstanceOf[List[Int]]
 
-                        val bestBGMMCol = LBM.ModelSelection.gridSearch(
+                        val bestBGMMCol = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(1),
                           rangeCol = List(5),
@@ -71,21 +85,21 @@ object Main {
 
                         var t0 = System.nanoTime()
 
-                        val bestBGMMRow = LBM.ModelSelection.gridSearch(
+                        val bestBGMMRow = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(5),
                           rangeCol = List(1),
                           verbose = verbose,
-                          nConcurrentEachTest = 7,
+                          nConcurrentEachTest = 4,
                           nTryMaxPerConcurrent = 1)
                         val bestBGMMRowPartition = bestBGMMRow("RowPartition").asInstanceOf[List[Int]]
 
-                        val bestBGMMCol = LBM.ModelSelection.gridSearch(
+                        val bestBGMMCol = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(1),
                           rangeCol = List(5),
                           verbose = verbose,
-                          nConcurrentEachTest = 7,
+                          nConcurrentEachTest = 4,
                           nTryMaxPerConcurrent = 1)
                         val bestBGMMColPartition = bestBGMMCol("ColPartition").asInstanceOf[List[Int]]
 
@@ -101,7 +115,7 @@ object Main {
 
                         var t0 = System.nanoTime()
 
-                        val bestBGMMRow = LBM.ModelSelection.gridSearch(
+                        val bestBGMMRow = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(4, 5, 6),
                           rangeCol = List(1),
@@ -110,7 +124,7 @@ object Main {
                           nTryMaxPerConcurrent = 1)
                         val bestBGMMRowPartition = bestBGMMRow("RowPartition").asInstanceOf[List[Int]]
 
-                        val bestBGMMCol = LBM.ModelSelection.gridSearch(
+                        val bestBGMMCol = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(1),
                           rangeCol = List(4, 5, 6),
@@ -129,13 +143,13 @@ object Main {
 
                       val ((ariLBM1, riLBM1, nmiLBM1, nClusterLBM1), runtimeLBM1) = {
                         var t0 = System.nanoTime()
-                        val bestLBM = LBM.ModelSelection.gridSearch(
+                        val bestLBM = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(5),
                           rangeCol = List(5),
                           verbose = verbose,
                           nConcurrentEachTest = 1,
-                          nTryMaxPerConcurrent = 10)
+                          nTryMaxPerConcurrent = 5)
                         val (rowMembershipLBM, colMembershipLBM) = (
                           bestLBM("RowPartition").asInstanceOf[List[Int]],
                           bestLBM("ColPartition").asInstanceOf[List[Int]])
@@ -149,13 +163,13 @@ object Main {
 
                       val ((ariLBM49, riLBM49, nmiLBM49, nClusterLBM49), runtimeLBM49) = {
                         var t0 = System.nanoTime()
-                        val bestLBM = LBM.ModelSelection.gridSearch(
+                        val bestLBM = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(5),
                           rangeCol = List(5),
                           verbose = verbose,
-                          nConcurrentEachTest = 49,
-                          nTryMaxPerConcurrent = 10)
+                          nConcurrentEachTest = 10,
+                          nTryMaxPerConcurrent = 5)
                         val (rowMembershipLBM, colMembershipLBM) = (
                           bestLBM("RowPartition").asInstanceOf[List[Int]],
                           bestLBM("ColPartition").asInstanceOf[List[Int]])
@@ -169,13 +183,13 @@ object Main {
 
                       val ((ariLBM_MS, riLBM_MS, nmiLBM_MS, nClusterLBM_MS), runtimeLBM_MS) = {
                         var t0 = System.nanoTime()
-                        val bestLBM = LBM.ModelSelection.gridSearch(
+                        val bestLBM = FunLBM.ModelSelection.gridSearch(
                           dataMatrix,
                           rangeRow = List(4, 5, 6),
                           rangeCol = List(4, 5, 6),
                           verbose = verbose,
                           nConcurrentEachTest = 1,
-                          nTryMaxPerConcurrent = 10)
+                          nTryMaxPerConcurrent = 5)
                         val (rowMembershipLBM, colMembershipLBM) = (
                           bestLBM("RowPartition").asInstanceOf[List[Int]],
                           bestLBM("ColPartition").asInstanceOf[List[Int]])
@@ -190,7 +204,7 @@ object Main {
                       val ((ariBDPMM, riBDPMM, nmiBDPMM, nClusterBDPMM), runtimeBDPMM) = {
                         var t0 = System.nanoTime()
 
-                        val (rowMembershipsBDPMM, _, _) = new NPLBM.CollapsedGibbsSampler(
+                        val (rowMembershipsBDPMM, _, _) = new FunNPLBM.CollapsedGibbsSampler(
                           dataList,
                           alphaPrior = alphaPrior,
                           betaPrior = betaPrior,
@@ -198,7 +212,7 @@ object Main {
                           nIter,
                           verbose = verbose, updateCol = false, updateRow = true)
 
-                        val (_, colMembershipsBDPMM, _) = new NPLBM.CollapsedGibbsSampler(
+                        val (_, colMembershipsBDPMM, _) = new FunNPLBM.CollapsedGibbsSampler(
                           dataList,
                           alphaPrior = alphaPrior,
                           betaPrior = betaPrior,
@@ -216,7 +230,7 @@ object Main {
 
                       val ((ariNPLBM, riNPLBM, nmiNPLBM, nClusterNPLBM), runtimeNPLBM) = {
                         var t0 = System.nanoTime()
-                        val (rowMembershipNPLBM, colMembershipNPLBM, _) = new NPLBM.CollapsedGibbsSampler(dataList,
+                        val (rowMembershipNPLBM, colMembershipNPLBM, _) = new FunNPLBM.CollapsedGibbsSampler(dataList,
                           alphaPrior = alphaPrior,
                           betaPrior = betaPrior).run(nIter, verbose = verbose)
                         val t1 = printTime(t0, "NPLBM")
@@ -239,15 +253,10 @@ object Main {
 
                         val append = true
 
-                      println(ARIMat)
-                      println(RIMat)
-                      println(NMIMat)
-                      println(nClusterMat)
-                      println(runtimesMat)
-                        //        IO.writeMatrixStringToCsv("src/main/scala/Benchmark/ARIs.csv", ARIMat, append=append)
-                        //        IO.writeMatrixStringToCsv("src/main/scala/Benchmark/RIs.csv" , RIMat , append=append)
-                        //        IO.writeMatrixStringToCsv("src/main/scala/Benchmark/NMIs.csv", NMIMat, append=append)
-                        //        IO.writeMatrixStringToCsv("src/main/scala/Benchmark/nClusters.csv", nClusterMat, append=append)
+                      IO.writeMatrixStringToCsv("src/main/scala/ARIs.csv", ARIMat, append=append)
+                      IO.writeMatrixStringToCsv("src/main/scala/RIs.csv" , RIMat , append=append)
+                      IO.writeMatrixStringToCsv("src/main/scala/NMIs.csv", NMIMat, append=append)
+                      IO.writeMatrixStringToCsv("src/main/scala/nClusters.csv", nClusterMat, append=append)
 
                 })
         }

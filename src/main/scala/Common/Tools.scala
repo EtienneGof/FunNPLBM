@@ -1,6 +1,7 @@
 package Common
 
 import Common.ProbabilisticTools.unitCovFunc
+import Common.Tools.prettyFormatLBM
 import breeze.linalg.eigSym.EigSym
 import breeze.linalg.{*, DenseMatrix, DenseVector, eigSym, max, min, sum}
 import breeze.numerics.{abs, exp, log, sqrt}
@@ -15,51 +16,44 @@ import scala.util.{Success, Try}
 
 object Tools extends java.io.Serializable {
 
-  def filterMatrixByColumn(Mat: DenseMatrix[DenseVector[Double]], indexList: List[Int]): DenseMatrix[DenseVector[Double]] = {
-    val dataList = indexList.map(Mat(*, ::).map(_.toArray.toList).toArray.toList.transpose).transpose
-    DenseMatrix(dataList: _*)
-  }
-
-  //  def relabel(L: List[Int]): List[Int] = {
-  //    val uniqueLabels = L.distinct.sorted
-  //    val dict = uniqueLabels.zipWithIndex.toMap
-  //    L.map(dict)
-  //  }
-
   def relabel[T: Ordering](L: List[T]): List[Int] = {
     val uniqueLabels = L.distinct.sorted
     val dict = uniqueLabels.zipWithIndex.toMap
     L.map(dict)
   }
 
-  def checkPosDef(M: DenseMatrix[Double]): Unit = {
-    val EigSym(lambda, _) = eigSym(M)
-    assert(lambda.forall(_>0))
-  }
-
   def partitionToOrderedCount(partition: List[Int]): List[Int] = {
     partition.groupBy(identity).mapValues(_.size).toList.sortBy(_._1).map(_._2)
   }
 
-  def prettyPrint(countRowCluster: List[Int], countColCluster: List[Int]): Unit = {
-
-    val mat: DenseMatrix[Int] = DenseVector(countRowCluster.toArray) * DenseVector(countColCluster.toArray).t
-
-    println(mat)
+  def prettyPrintLBM(countRowCluster: List[Int], countColCluster: List[Int]): Unit = {
+    println(prettyFormatLBM(countRowCluster, countColCluster))
   }
 
-  def prettyPrintCLBM(countRowCluster: List[List[Int]], countColCluster: List[Int]): Unit = {
+  def prettyFormatLBM(countRowCluster: List[Int], countColCluster: List[Int]): DenseMatrix[String] = {
+    val mat: DenseMatrix[String] = (DenseVector(countRowCluster.toArray) * DenseVector(countColCluster.toArray).t).map(i => i.toString)
 
-    val L = countRowCluster.length
-    val K_max = countRowCluster.map(_.length).max
-    val mat = DenseMatrix.tabulate[String](L,K_max){
-      case (i, j) => if(countRowCluster(i).length > j){
-        (countRowCluster(i)(j)*countColCluster(i)).toString} else {"-"}
+    val rowName: DenseMatrix[String] = DenseMatrix.vertcat(
+      DenseMatrix(countRowCluster.map(_.toString)),
+      DenseMatrix(Array.fill(countRowCluster.length)("|"))).t
 
-    }
-    println(mat.t)
+    val colName: DenseMatrix[String] = DenseMatrix.horzcat(
+      DenseMatrix.vertcat(
+        DenseMatrix(Array(" "," ")),
+        DenseMatrix(Array(" "," "))
+      ),
+      DenseMatrix.vertcat(
+        DenseMatrix(countColCluster.map(_.toString)),
+        DenseMatrix(Array.fill(countColCluster.length)("—"))
+      )
+    )
 
+    DenseMatrix.vertcat(
+      colName,
+      DenseMatrix.horzcat(rowName, mat)
+    )
   }
+
 
   def prettyPrint(sizePerBlock: Map[(Int,Int), Int]): Unit = {
     val keys = sizePerBlock.keys
@@ -73,58 +67,12 @@ object Tools extends java.io.Serializable {
     println(mat.t)
   }
 
-  def nestedMap[A, B, C](listA: List[List[A]],listB: List[List[B]])(f: (A,B) => C): List[List[C]] = {
-    require(listA.length == listB.length)
-    listA.indices.foreach(i => require(listA(i).length== listB(i).length))
-    listA.indices.map(i => listA(i).indices.map(j => f(listA(i)(j), listB(i)(j))).toList).toList
-  }
-
   def getPartitionFromSize(size: List[Int]): List[Int] = {
     size.indices.map(idx => List.fill(size(idx))(idx)).reduce(_ ++ _)
   }
 
-  def aggregateListListDV(a: List[List[DenseVector[Double]]],
-                          b: List[List[DenseVector[Double]]]): List[List[DenseVector[Double]]] = {
-    a.indices.map(l => {
-      a(l).indices.map(k => {
-        a(l)(k) + b(l)(k)
-      }).toList
-    }).toList
-  }
-
-  def sortedCount(l: List[Int]): List[Int] = {
-    l.groupBy(identity).mapValues(_.size).toList.sortBy(_._1).map(_._2)
-  }
-
-  def aggregateListDV(a: List[DenseVector[Double]],
-                      b: List[DenseVector[Double]]): List[DenseVector[Double]] = {
-    a.indices.map(i => {
-      a(i) + b(i)
-    }).toList
-  }
-
-  def getProportions(l: List[Int]): List[Double] = {
-    val countCols = l.groupBy(identity).mapValues(_.size)
-    countCols.map(c => c._2 / countCols.values.sum.toDouble).toList
-  }
-
   def argmax(l: List[Double]): Int ={
     l.view.zipWithIndex.maxBy(_._1)._2
-  }
-
-  def getTime[R](block: => R): Double = {
-    val t0 = System.nanoTime()
-    val result = block    // call-by-name
-    val t1 = System.nanoTime()
-    (t1 - t0)/ 1e9
-  }
-
-  def time[R](block: => R): R = {
-    val t0 = System.nanoTime()
-    val result = block    // call-by-name
-    val t1 = System.nanoTime()
-    println("Elapsed time: " + (t1 - t0)/ 1e9 + "s")
-    result
   }
 
   def printTime(t0:Long, stepName: String, verbose:Boolean = true): Long={
@@ -142,17 +90,6 @@ object Tools extends java.io.Serializable {
     Matrices.dense(A.rows, A.cols, A.toArray)
   }
 
-  def checkPartitionEqual(partitionA : List[Int], partitionB: List[Int]): Boolean = {
-    require(partitionA.length == partitionB.length)
-    val uniqueA = partitionA.distinct.zipWithIndex
-    val uniqueB = partitionB.distinct.zipWithIndex
-    val dictA = (for ((k, v) <- uniqueA) yield (v, k)).toMap
-    val dictB = (for ((k, v) <- uniqueB) yield (v, k)).toMap
-    val reOrderedA = partitionA.map(e => dictA(e))
-    val reOrderedB = partitionB.map(e => dictB(e))
-
-    sum(DenseVector(reOrderedA.toArray)-DenseVector(reOrderedB.toArray))==0
-  }
 
   def matrixToDenseMatrix(A: Matrix): DenseMatrix[Double] = {
     val p = A.numCols
@@ -160,59 +97,14 @@ object Tools extends java.io.Serializable {
     DenseMatrix(A.toArray).reshape(n,p)
   }
 
-  def isInteger(x: String) : Boolean = {
-    val y = Try(x.toInt)
-    y match {
-      case Success(_) => true
-      case _ => false
-    }
-  }
-
-  def inverseIndexedList(data: List[(Int, Array[DenseVector[Double]])]): List[(Int, Array[DenseVector[Double]])] = {
-    val p = data.take(1).head._2.length
-    (0 until p).map(j => {
-      (j, data.map(row => row._2(j)).toArray)
-    }).toList
-  }
-
-  def getEntireRowPartition(rowPartition: List[List[Int]]): Array[Int] = {
-    val n = rowPartition.head.length
-    val L = rowPartition.length
-    val rowMultiPartition: List[List[Int]] = (0 until n).map(i => (0 until L).map(l => rowPartition(l)(i)).toList).toList
-
-    val mapMultiPartitionToRowCluster = rowMultiPartition.distinct.zipWithIndex.toMap
-    rowMultiPartition.map(mapMultiPartitionToRowCluster(_)).toArray
-  }
-
-  def remove[T](list: List[T], idx: Int):List[T] = list.patch(idx, Nil, 1)
-
-  def insert[T](list: List[T], i: Int, values: T*): List[T] = {
-    val (front, back) = list.splitAt(i)
-    front ++ values ++ back
-  }
-
-  def insertList[T](list: List[T], i: Int, values: List[T]): List[T] = {
-    val (front, back) = list.splitAt(i)
-    front ++ values ++ back
-  }
 
   def roundMat(m: DenseMatrix[Double], digits:Int=0): DenseMatrix[Double] = {
-    m.map(round(_,digits))
-  }
-
-  def roundDv(m: DenseVector[Double], digits:Int=0): DenseVector[Double] = {
     m.map(round(_,digits))
   }
 
   def allEqual[T](x: List[T], y:List[T]): Boolean = {
     require(x.length == y.length)
     val listBool = x.indices.map(i => {x(i)==y(i)})
-    listBool.forall(identity)
-  }
-
-  def allEqualDouble(x: List[Double], y:List[Double], tol:Double = 0D): Boolean = {
-    require(x.length == y.length)
-    val listBool = x.indices.map(i => {abs(x(i) - y(i)) <= tol})
     listBool.forall(identity)
   }
 
@@ -244,55 +136,6 @@ object Tools extends java.io.Serializable {
       val wj  = reducedCorrelatedPartition(j)
       (idx, vj, wj)
     }).sortBy(_._1).map(c => (c._2, c._3)).toList)
-  }
-
-  def getMCCBlockPartition(redundantColPartition: List[Int],
-                           correlatedColPartitions: List[List[Int]],
-                           rowPartitions: List[List[Int]]) : List[Int] = {
-
-    println("getMCCBlockPartition")
-
-    val combinedColPartition = combineRedundantAndCorrelatedColPartitions(redundantColPartition, correlatedColPartitions)
-
-    val rowPartitionDuplicatedPerColCluster = correlatedColPartitions.indices.map(h => {
-      List.fill(correlatedColPartitions(h).distinct.length)(rowPartitions(h))
-    }).reduce(_++_)
-
-    val indexBiClusters: List[(Int, Int)] = getCondBlockPartition(rowPartitionDuplicatedPerColCluster, combinedColPartition)
-
-    relabel(indexBiClusters)
-
-  }
-
-
-  def updateColPartition(formerColPartition: List[Int],
-                         colToUpdate: Int,
-                         newColPartition: List[Int]): List[Int]={
-    var newGlobalColPartition = formerColPartition
-    val otherThanlMap:Map[Int,Int] = formerColPartition.filter(_!=colToUpdate).distinct.sorted.zipWithIndex.toMap
-    val L = max(formerColPartition)
-
-    var iterNewColPartition = 0
-    for( j <- newGlobalColPartition.indices){
-      if(formerColPartition(j)==colToUpdate){
-        newGlobalColPartition = newGlobalColPartition.updated(j,newColPartition(iterNewColPartition)+L)
-        iterNewColPartition +=1
-      } else {
-        newGlobalColPartition = newGlobalColPartition.updated(j,otherThanlMap(formerColPartition(j)))
-      }
-    }
-    newGlobalColPartition
-  }
-
-  def generateCombinationWithReplacement(maxK: Int, L: Int): List[List[Int]] ={
-    List.fill(L)((1 to maxK).toList).flatten.combinations(L).toList
-  }
-
-  implicit val basis: RandBasis = RandBasis.withSeed(2)
-
-  def getRowPartitionFromDataWithRowPartition(precData: RDD[(Int, Array[DenseVector[Double]], List[Int])]): List[List[Int]] = {
-    precData.map(row => (row._1, row._3))
-      .collect().sortBy(_._1).map(_._2).toList.transpose
   }
 
   def getSizeAndSumByBlock(data: RDD[((Int, Int), Array[DenseVector[Double]])]): RDD[((Int, Int), (DenseVector[Double], Int))] = {
@@ -349,20 +192,6 @@ object Tools extends java.io.Serializable {
     (listMeans, covMat, sizeBlock, sizeBlockMap)
   }
 
-  def getLoadings(covarianceMatrix: DenseMatrix[Double],
-                  nMaxEigenValues: Int= 3,
-                  thresholdVarExplained: Double=0.99): DenseMatrix[Double] = {
-
-    val (sortedEigenVectors, sortedEigenValues) = getLoadingsAndEigenValues(covarianceMatrix)
-
-    val normalizedEigenValues = sortedEigenValues/sum(sortedEigenValues)
-    val cumulatedVarExplained = normalizedEigenValues.toArray.map{var s = 0D; d => {s += d; s}}
-    val idxMaxVarianceExplained = cumulatedVarExplained.toList.indexWhere(_> thresholdVarExplained)
-    val idxKept = min(idxMaxVarianceExplained, nMaxEigenValues)
-    val keptEigenVectors = sortedEigenVectors(::, 0 until idxKept)
-    keptEigenVectors.t
-  }
-
   def getLoadingsAndVarianceExplained(covarianceMatrix: DenseMatrix[Double],
                                       nMaxEigenValues: Int= 3,
                                       thresholdVarExplained: Double=0.999999): (DenseMatrix[Double], DenseVector[Double]) = {
@@ -388,10 +217,6 @@ object Tools extends java.io.Serializable {
     (sortedEigVec.t, sortedEigVal)
   }
 
-  def mean(X: List[DenseVector[Double]]): DenseVector[Double] = {
-    require(X.nonEmpty)
-    X.reduce(_+_) / X.length.toDouble
-  }
 
   def factorial(n: Double): Double = {
     if (n == 0) {1} else {n * factorial(n-1)}
@@ -414,11 +239,6 @@ object Tools extends java.io.Serializable {
     data(::,*).map(_.toArray.toList).t.toArray.toList
   }
 
-  def addDuplicate(dm: DenseMatrix[DenseVector[Double]], idx: Int, nDuplicate: Int) : DenseMatrix[DenseVector[Double]] = {
-    val dataList = matrixToDataByCol(dm)
-    val dataWithDuplicate: List[List[DenseVector[Double]]] = insertList(dataList, idx, List.fill(nDuplicate-1)(dataList(idx)))
-    DenseMatrix( dataWithDuplicate:_*).t
-  }
 
   def getScores(estimatedPartition: List[Int], observedPartition: List[Int]) = {
     (adjustedRandIndex(estimatedPartition.toArray, observedPartition.toArray),
@@ -427,36 +247,4 @@ object Tools extends java.io.Serializable {
       estimatedPartition.distinct.length)
   }
 
-  def distanceMatrix[T](data: List[T], distance: (T, T) => Double): DenseMatrix[Double] = {
-    val DTri = DenseMatrix.zeros[Double](data.length, data.length)
-    data.indices.par.foreach(i => {
-      (0 until i).par.foreach(j => {
-        DTri.update(i, j, distance(data(i), data(j)))
-      })
-    })
-    DTri + DTri.t
-  }
-
-  def euclidDistanceVec(x: DenseVector[Double], y: DenseVector[Double]): Double = {
-    sqrt(sum(breeze.numerics.pow(x - y, 2)))
-  }
-
-
-  def distMax(x: List[DenseVector[Double]], y:List[DenseVector[Double]]): Double = {
-    x.indices.map(i => {
-      euclidDistanceVec(x(i), y(i))
-    }).max
-  }
-
-  def distMin(x: List[DenseVector[Double]], y:List[DenseVector[Double]]): Double = {
-    x.indices.map(i => {
-      euclidDistanceVec(x(i), y(i))
-    }).min
-  }
-
-  def distMean(x: List[DenseVector[Double]], y:List[DenseVector[Double]]): Double = {
-    x.indices.map(i => {
-      euclidDistanceVec(x(i), y(i))
-    }).sum / x.length.toDouble
-  }
 }
