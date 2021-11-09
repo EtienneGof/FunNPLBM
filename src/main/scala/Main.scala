@@ -235,6 +235,7 @@ object Main {
                         val RIMat  = DenseMatrix( RIs.map(_.toString)).reshape(1, ARIs.length)
                         val NMIMat = DenseMatrix(NMIs.map(_.toString)).reshape(1, ARIs.length)
                         val nClusterMat = DenseMatrix(nClusters.map(_.toString)).reshape(1, ARIs.length)
+                        val runtimesMat = DenseMatrix(runtimes.map(_.toString)).reshape(1, ARIs.length)
 
                         val append = true
 
